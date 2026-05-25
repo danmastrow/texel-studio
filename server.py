@@ -77,7 +77,42 @@ OPENAI_MODELS_CUSTOM = [m.strip() for m in os.getenv("OPENAI_MODELS", "").split(
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODELS = [m.strip() for m in os.getenv("OLLAMA_MODELS", "").split(",") if m.strip()]
 ALL_MODELS = GEMINI_MODELS + OPENAI_MODELS + OPENAI_MODELS_CUSTOM + OLLAMA_MODELS
-DEFAULT_MODEL = "gemini-3-flash-preview"
+
+
+def has_gemini_credentials() -> bool:
+    if os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"):
+        return True
+    if os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_CONTENT"):
+        return True
+    sa_path = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
+    if sa_path:
+        for candidate in [
+            Path(sa_path),
+            Path(__file__).parent / sa_path,
+            Path(__file__).parent.parent / "sprite-forge" / sa_path,
+        ]:
+            if candidate.exists():
+                return True
+    return False
+
+
+def resolve_model(model: str | None) -> str:
+    if model and model in ALL_MODELS:
+        return model
+    return DEFAULT_MODEL
+
+
+def _compute_default_model() -> str:
+    if OPENAI_MODELS_CUSTOM:
+        return OPENAI_MODELS_CUSTOM[0]
+    if OLLAMA_MODELS:
+        return OLLAMA_MODELS[0]
+    if has_gemini_credentials():
+        return "gemini-3-flash-preview"
+    return ALL_MODELS[0] if ALL_MODELS else "gemini-3-flash-preview"
+
+
+DEFAULT_MODEL = _compute_default_model()
 IMAGE_GEN_MODELS = [
     "gemini-3.1-flash-image-preview",
 ]
@@ -187,7 +222,9 @@ def init_db():
     if not _has_column(conn, "generations", "reference_id"):
         conn.execute("ALTER TABLE generations ADD COLUMN reference_id TEXT")
 
-    # Insert default palette if none exist
+    # Seed bundled Aseprite palettes (and legacy default on first run).
+    from palettes import seed_aseprite_palettes
+
     if conn.execute("SELECT COUNT(*) FROM palettes").fetchone()[0] == 0:
         conn.execute(
             "INSERT INTO palettes (name, colors) VALUES (?, ?)",
@@ -201,6 +238,7 @@ def init_db():
                 "#D4A44E", "#E8BC60", "#FFFFFF", "#000000",
             ]))
         )
+    seed_aseprite_palettes(conn)
     conn.commit()
     conn.close()
 
@@ -233,7 +271,11 @@ def image_to_base64(img: Image.Image) -> str:
     return base64.b64encode(buf.getvalue()).decode()
 
 def upscale_image(img: Image.Image, target: int = 512) -> Image.Image:
-    return img.resize((target, target), Image.NEAREST)
+    if img.width == img.height:
+        return img.resize((target, target), Image.NEAREST)
+    scale = target / max(img.width, img.height)
+    size = (max(1, int(img.width * scale)), max(1, int(img.height * scale)))
+    return img.resize(size, Image.NEAREST)
 
 # ── Autotile generation ──
 # Bitmask: TOP=1, RIGHT=2, BOTTOM=4, LEFT=8
@@ -772,6 +814,12 @@ def delete_palette(palette_id: int):
 @app.post("/api/reference")
 def generate_reference(data: ReferenceRequest):
     """Generate a concept/reference image using image generation model."""
+    if not has_gemini_credentials():
+        return JSONResponse(
+            {"error": "Concept art requires Gemini. Add GEMINI_API_KEY to .env, or skip reference and use Generate Sprite directly."},
+            status_code=503,
+        )
+
     rd = get_redis()
     if rd:
         import uuid as _uuid
@@ -938,7 +986,7 @@ async def start_generation(data: GenerateRequest):
         raise HTTPException(400, "Colors array is required")
 
     db = get_db()
-    model = data.model if data.model in GEMINI_MODELS else DEFAULT_MODEL
+    model = resolve_model(data.model)
     cur = db.execute(
         "INSERT INTO generations (prompt, system_prompt, colors, size, model, reference_id, sprite_type) VALUES (?, ?, ?, ?, ?, ?, ?)",
         (data.prompt, data.system_prompt, json.dumps(data.colors), data.size, model, data.reference_id, data.sprite_type),
@@ -1170,6 +1218,7 @@ def get_settings():
         "default_model": DEFAULT_MODEL,
         "image_models": IMAGE_GEN_MODELS,
         "default_image_model": DEFAULT_IMAGE_MODEL,
+        "has_gemini": has_gemini_credentials(),
         "sprite_types": {k: {"label": v["label"], "has_tileset": v["has_tileset"]} for k, v in SPRITE_TYPES.items()},
     }
 

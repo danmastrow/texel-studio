@@ -38,6 +38,7 @@ export interface Settings {
   default_model: string;
   image_models: string[];
   default_image_model: string;
+  has_gemini?: boolean;
   sprite_types: Record<string, { label: string; has_tileset: boolean }>;
 }
 

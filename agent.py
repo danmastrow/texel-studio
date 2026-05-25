@@ -85,21 +85,31 @@ def _get_posthog_callback(distinct_id: str | None = None, trace_id: str | None =
 # ── Canvas State ──
 
 class Canvas:
-    def __init__(self, size: int, palette: list[str], pixels: list[list[int]] | None = None):
-        self.size = size
+    def __init__(
+        self,
+        size: int,
+        palette: list[str],
+        pixels: list[list[int]] | None = None,
+        width: int | None = None,
+        height: int | None = None,
+    ):
+        self.width = width or size
+        self.height = height or size
+        # Keep size for existing square callers and rough scale decisions.
+        self.size = max(self.width, self.height)
         self.palette = palette
-        self.pixels = pixels if pixels else [[-1] * size for _ in range(size)]
+        self.pixels = pixels if pixels else [[-1] * self.width for _ in range(self.height)]
 
     def set_pixel(self, x: int, y: int, color: int) -> str:
-        if not (0 <= x < self.size and 0 <= y < self.size):
-            return f"Error: ({x},{y}) out of bounds (0-{self.size-1})"
+        if not (0 <= x < self.width and 0 <= y < self.height):
+            return f"Error: ({x},{y}) out of bounds x=0-{self.width-1}, y=0-{self.height-1}"
         if color < -1 or color >= len(self.palette):
             return f"Error: color index {color} invalid (use -1 to {len(self.palette)-1})"
         self.pixels[y][x] = color
         return f"Set ({x},{y}) to {color}"
 
     def get_pixel(self, x: int, y: int) -> int:
-        if 0 <= x < self.size and 0 <= y < self.size:
+        if 0 <= x < self.width and 0 <= y < self.height:
             return self.pixels[y][x]
         return -1
 
@@ -107,8 +117,8 @@ class Canvas:
         if color < -1 or color >= len(self.palette):
             return f"Error: color index {color} invalid"
         count = 0
-        for y in range(max(0, y1), min(self.size, y2 + 1)):
-            for x in range(max(0, x1), min(self.size, x2 + 1)):
+        for y in range(max(0, y1), min(self.height, y2 + 1)):
+            for x in range(max(0, x1), min(self.width, x2 + 1)):
                 self.pixels[y][x] = color
                 count += 1
         return f"Filled rect ({x1},{y1})-({x2},{y2}) with {color}, {count} pixels"
@@ -123,7 +133,7 @@ class Canvas:
         count = 0
         cx, cy = x1, y1
         while True:
-            if 0 <= cx < self.size and 0 <= cy < self.size:
+            if 0 <= cx < self.width and 0 <= cy < self.height:
                 self.pixels[cy][cx] = color
                 count += 1
             if cx == x2 and cy == y2:
@@ -141,8 +151,8 @@ class Canvas:
         if color < -1 or color >= len(self.palette):
             return f"Error: color index {color} invalid"
         count = 0
-        for x in range(max(0, x_start), min(self.size, x_end + 1)):
-            if 0 <= y < self.size:
+        for x in range(max(0, x_start), min(self.width, x_end + 1)):
+            if 0 <= y < self.height:
                 self.pixels[y][x] = color
                 count += 1
         return f"Filled row y={y}, {count} pixels"
@@ -151,8 +161,8 @@ class Canvas:
         if color < -1 or color >= len(self.palette):
             return f"Error: color index {color} invalid"
         count = 0
-        for y in range(max(0, y_start), min(self.size, y_end + 1)):
-            if 0 <= x < self.size:
+        for y in range(max(0, y_start), min(self.height, y_end + 1)):
+            if 0 <= x < self.width:
                 self.pixels[y][x] = color
                 count += 1
         return f"Filled column x={x}, {count} pixels"
@@ -166,8 +176,8 @@ class Canvas:
         # Check bounding box
         max_r = math.ceil(math.sqrt(hw * hw + hh * hh)) + 1
         count = 0
-        for py in range(max(0, cy - max_r), min(self.size, cy + max_r + 1)):
-            for px in range(max(0, cx - max_r), min(self.size, cx + max_r + 1)):
+        for py in range(max(0, cy - max_r), min(self.height, cy + max_r + 1)):
+            for px in range(max(0, cx - max_r), min(self.width, cx + max_r + 1)):
                 # Rotate point into rect's local space
                 dx = px - cx
                 dy = py - cy
@@ -179,7 +189,7 @@ class Canvas:
         return count
 
     def to_image(self) -> Image.Image:
-        img = Image.new("RGBA", (self.size, self.size), (0, 0, 0, 0))
+        img = Image.new("RGBA", (self.width, self.height), (0, 0, 0, 0))
         for y, row in enumerate(self.pixels):
             for x, idx in enumerate(row):
                 if 0 <= idx < len(self.palette):
@@ -189,7 +199,7 @@ class Canvas:
         return img
 
     def to_grid_string(self) -> str:
-        header = "    " + " ".join(f"{x:>3}" for x in range(self.size))
+        header = "    " + " ".join(f"{x:>3}" for x in range(self.width))
         rows = [f"{y:>3} " + " ".join(f"{v:>3}" for v in row) for y, row in enumerate(self.pixels)]
         return header + "\n" + "\n".join(rows)
 
@@ -203,17 +213,17 @@ class Canvas:
             return "#"
 
         # Column ruler
-        if self.size <= 16:
-            ruler = "   " + "".join(f"{x:X}" for x in range(self.size))
+        if self.width <= 16:
+            ruler = "   " + "".join(f"{x:X}" for x in range(self.width))
         else:
             # Two-line ruler for 32+
-            tens = "   " + "".join(str(x // 10) if x >= 10 else " " for x in range(self.size))
-            ones = "   " + "".join(f"{x % 10}" for x in range(self.size))
+            tens = "   " + "".join(str(x // 10) if x >= 10 else " " for x in range(self.width))
+            ones = "   " + "".join(f"{x % 10}" for x in range(self.width))
             ruler = tens + "\n" + ones
 
         rows = []
         for y, row in enumerate(self.pixels):
-            label = f"{y:>2} " if self.size <= 16 else f"{y:>3}"
+            label = f"{y:>2} " if self.height <= 16 else f"{y:>3}"
             rows.append(label + "".join(_char(v) for v in row))
 
         return ruler + "\n" + "\n".join(rows)
@@ -221,8 +231,8 @@ class Canvas:
     def region_summary(self, y1: int, x1: int, y2: int, x2: int) -> str:
         """Describe what's in a rectangular region — helps the model understand spatial layout."""
         counts: dict[int, int] = {}
-        for y in range(max(0, y1), min(self.size, y2 + 1)):
-            for x in range(max(0, x1), min(self.size, x2 + 1)):
+        for y in range(max(0, y1), min(self.height, y2 + 1)):
+            for x in range(max(0, x1), min(self.width, x2 + 1)):
                 v = self.pixels[y][x]
                 counts[v] = counts.get(v, 0) + 1
         total = sum(counts.values())
@@ -243,8 +253,8 @@ class Canvas:
 
     def draw_circle(self, cx: int, cy: int, radius: int, color: int, fill: bool = True) -> int:
         count = 0
-        for y in range(max(0, cy - radius), min(self.size, cy + radius + 1)):
-            for x in range(max(0, cx - radius), min(self.size, cx + radius + 1)):
+        for y in range(max(0, cy - radius), min(self.height, cy + radius + 1)):
+            for x in range(max(0, cx - radius), min(self.width, cx + radius + 1)):
                 dx, dy = x - cx, y - cy
                 dist_sq = dx * dx + dy * dy
                 r_sq = radius * radius
@@ -261,8 +271,8 @@ class Canvas:
 
     def draw_ellipse(self, cx: int, cy: int, rx: int, ry: int, color: int, fill: bool = True) -> int:
         count = 0
-        for y in range(max(0, cy - ry), min(self.size, cy + ry + 1)):
-            for x in range(max(0, cx - rx), min(self.size, cx + rx + 1)):
+        for y in range(max(0, cy - ry), min(self.height, cy + ry + 1)):
+            for x in range(max(0, cx - rx), min(self.width, cx + rx + 1)):
                 dx, dy = (x - cx) / max(rx, 1), (y - cy) / max(ry, 1)
                 dist = dx * dx + dy * dy
                 if fill:
@@ -280,9 +290,9 @@ class Canvas:
             return (px - bx) * (ay - by) - (ax - bx) * (py - by)
 
         min_x = max(0, min(x1, x2, x3))
-        max_x = min(self.size - 1, max(x1, x2, x3))
+        max_x = min(self.width - 1, max(x1, x2, x3))
         min_y = max(0, min(y1, y2, y3))
-        max_y = min(self.size - 1, max(y1, y2, y3))
+        max_y = min(self.height - 1, max(y1, y2, y3))
 
         count = 0
         for y in range(min_y, max_y + 1):
@@ -313,8 +323,8 @@ class Canvas:
         n_colors = len(colors)
         if n_colors == 0:
             return 0
-        for y in range(max(0, y1), min(self.size, y2 + 1)):
-            for x in range(max(0, x1), min(self.size, x2 + 1)):
+        for y in range(max(0, y1), min(self.height, y2 + 1)):
+            for x in range(max(0, x1), min(self.width, x2 + 1)):
                 n = self._hash_noise(int(x * scale), int(y * scale), seed)
                 idx = int(n * n_colors) % n_colors
                 self.pixels[y][x] = colors[idx]
@@ -335,8 +345,8 @@ class Canvas:
             points.append((px, py, colors[i % len(colors)]))
 
         count = 0
-        for y in range(max(0, y1), min(self.size, y2 + 1)):
-            for x in range(max(0, x1), min(self.size, x2 + 1)):
+        for y in range(max(0, y1), min(self.height, y2 + 1)):
+            for x in range(max(0, x1), min(self.width, x2 + 1)):
                 best_dist = float('inf')
                 best_color = colors[0]
                 for px, py, pc in points:
@@ -355,8 +365,8 @@ class Canvas:
         n_colors = len(colors)
         if n_colors == 0:
             return 0
-        for y in range(max(0, cy - radius), min(self.size, cy + radius + 1)):
-            for x in range(max(0, cx - radius), min(self.size, cx + radius + 1)):
+        for y in range(max(0, cy - radius), min(self.height, cy + radius + 1)):
+            for x in range(max(0, cx - radius), min(self.width, cx + radius + 1)):
                 if (x - cx) ** 2 + (y - cy) ** 2 <= radius ** 2:
                     n = self._hash_noise(x, y, seed)
                     self.pixels[y][x] = colors[int(n * n_colors) % n_colors]
@@ -364,7 +374,8 @@ class Canvas:
         return count
 
     def to_image_b64(self, scale: int = 512) -> str:
-        img = self.to_image().resize((scale, scale), Image.NEAREST)
+        factor = max(1, scale // max(self.width, self.height))
+        img = self.to_image().resize((self.width * factor, self.height * factor), Image.NEAREST)
         buf = io.BytesIO()
         img.save(buf, format="PNG")
         return base64.b64encode(buf.getvalue()).decode()
@@ -457,10 +468,16 @@ def make_tools(canvas: Canvas, vision: bool = True, full_toolset: bool = True):
         total = sum(c for i, c in color_counts.items() if i >= 0)
 
         # Spatial summary: describe each quadrant
-        half = canvas.size // 2
-        spatial = f"TOP-LEFT: {canvas.region_summary(0, 0, half-1, half-1)} | TOP-RIGHT: {canvas.region_summary(0, half, half-1, canvas.size-1)} | BOTTOM-LEFT: {canvas.region_summary(half, 0, canvas.size-1, half-1)} | BOTTOM-RIGHT: {canvas.region_summary(half, half, canvas.size-1, canvas.size-1)}"
+        half_w = canvas.width // 2
+        half_h = canvas.height // 2
+        spatial = (
+            f"TOP-LEFT: {canvas.region_summary(0, 0, half_h-1, half_w-1)} | "
+            f"TOP-RIGHT: {canvas.region_summary(0, half_w, half_h-1, canvas.width-1)} | "
+            f"BOTTOM-LEFT: {canvas.region_summary(half_h, 0, canvas.height-1, half_w-1)} | "
+            f"BOTTOM-RIGHT: {canvas.region_summary(half_h, half_w, canvas.height-1, canvas.width-1)}"
+        )
 
-        result = f"{grid}\n\nLEGEND: {', '.join(summary[:12])}\nFilled: {total}/{canvas.size*canvas.size}px\nLAYOUT: {spatial}"
+        result = f"{grid}\n\nLEGEND: {', '.join(summary[:12])}\nFilled: {total}/{canvas.width*canvas.height}px\nLAYOUT: {spatial}"
 
         # Only include base64 preview for vision-capable models
         if vision:
@@ -572,19 +589,9 @@ def _get_llm(model_name: str, temperature: float = 0.7):
         from langchain_google_genai import ChatGoogleGenerativeAI
         return ChatGoogleGenerativeAI(model=model_name, temperature=temperature)
 
-    # Gemini via Vertex AI (service account)
-    import json as _json
-    from langchain_google_vertexai import ChatVertexAI
-    sa_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
-    project = None
-    if sa_path and os.path.exists(sa_path):
-        with open(sa_path) as f:
-            project = _json.load(f).get("project_id")
-    return ChatVertexAI(
-        model_name=model_name,
-        temperature=temperature,
-        project=project,
-        location=os.getenv("GOOGLE_CLOUD_LOCATION", "global"),
+    raise RuntimeError(
+        f"No credentials configured for model '{model_name}'. "
+        "Use OPENAI_MODELS + OPENAI_BASE_URL for local models, or set GEMINI_API_KEY for Gemini."
     )
 
 
@@ -621,7 +628,10 @@ AGENT_TYPE_HINTS = {
 
 def build_system_prompt(user_prompt: str, palette: list[str], size: int,
                         style_prompt: str, has_reference: bool, sprite_type: str = "block",
-                        model_name: str = "") -> str:
+                        model_name: str = "", width: int | None = None,
+                        height: int | None = None) -> str:
+    canvas_width = width or size
+    canvas_height = height or size
     palette_desc = "\n".join(
         f"  {i} (char {'A' if i >= 10 else str(i) if i < 10 else chr(ord('A') + i - 10)}): {c}"
         if i >= 10 else f"  {i}: {c}"
@@ -666,13 +676,13 @@ def build_system_prompt(user_prompt: str, palette: list[str], size: int,
  0 ................    ← row 0 (all transparent)
  1 ..0000000000....    ← row 1 (color 0 in columns 2-11)
 Each character is a palette index: 0-9 = colors 0-9, A-Z = colors 10-35, . = transparent
-Read it like a picture: rows go top to bottom (y), columns go left to right (x).""" if size <= 16 else f"""When you call view_canvas, you see a grid. Each character = one pixel.
+Read it like a picture: rows go top to bottom (y), columns go left to right (x).""" if canvas_width <= 16 else f"""When you call view_canvas, you see a grid. Each character = one pixel.
 0-9 = palette colors 0-9, A-Z = colors 10-35, . = transparent.
 Rows = y (top to bottom), columns = x (left to right)."""
 
     return f"""{style_prompt}
 
-You are a pixel artist. You draw on a {size}x{size} canvas using color indices from a palette.
+You are a pixel artist. You draw on a {canvas_width}x{canvas_height} canvas using color indices from a palette.
 
 SUBJECT: {user_prompt}
 
@@ -686,7 +696,7 @@ Use -1 for transparent.
 
 COORDINATE SYSTEM:
 - (0,0) = top-left corner
-- ({size-1},{size-1}) = bottom-right corner
+- ({canvas_width-1},{canvas_height-1}) = bottom-right corner
 - x goes RIGHT (columns), y goes DOWN (rows)
 
 {grid_explanation}
@@ -722,6 +732,8 @@ def run_agent_stream(
     max_steps: int = 80,
     existing_pixels: list[list[int]] | None = None,
     cancel_check: Any = None,
+    width: int | None = None,
+    height: int | None = None,
 ):
     """
     Run the agent or continue an existing session.
@@ -737,7 +749,7 @@ def run_agent_stream(
     # Build the canvas from the caller-provided pixel state. Canvas pixel state
     # lives outside the LangGraph thread (it's owned by the job system, not
     # the conversation). LangGraph just owns the message history.
-    canvas = Canvas(size, palette, existing_pixels)
+    canvas = Canvas(size, palette, existing_pixels, width=width, height=height)
     is_new = not thread_exists(gen_id)
     thread_id = _thread_id_for(gen_id)
 
@@ -749,7 +761,17 @@ def run_agent_stream(
     agent = create_react_agent(llm, tools, checkpointer=checkpointer)
 
     if is_new:
-        sys_prompt = build_system_prompt(message, palette, size, style_prompt, reference_b64 is not None, sprite_type, model_name)
+        sys_prompt = build_system_prompt(
+            message,
+            palette,
+            size,
+            style_prompt,
+            reference_b64 is not None,
+            sprite_type,
+            model_name,
+            width=width,
+            height=height,
+        )
         user_parts = [{"type": "text", "text": sys_prompt}]
         if reference_b64:
             user_parts.append({

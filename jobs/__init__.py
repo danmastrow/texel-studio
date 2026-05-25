@@ -135,6 +135,7 @@ def parse_params(kind: str, raw: dict[str, Any]) -> BaseModel:
 
 def _load_builtins() -> None:
     from . import sprite_generate    # noqa: F401
+    from . import sprite_parallel_generate  # noqa: F401
     from . import sprite_chat        # noqa: F401
     from . import sprite_reference   # noqa: F401
     from . import sprite_tileset     # noqa: F401

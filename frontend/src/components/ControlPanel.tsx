@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
+import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { referenceUrl } from "@/lib/api";
 
@@ -79,6 +80,13 @@ export function ControlPanel({ studio }: { studio: any }) {
       <div className="px-3.5 py-3 flex items-center gap-2" style={{ borderBottom: "1px solid var(--border)" }}>
         <div style={{ width: 6, height: 6, background: "var(--accent)", transform: "rotate(45deg)" }} />
         <span style={{ fontSize: "11px", fontWeight: 600, letterSpacing: "0.05em" }}>TEXEL STUDIO</span>
+        <Link
+          href="/parallel-agents"
+          className="ml-auto"
+          style={{ fontSize: "9px", color: "var(--text-faint)", textTransform: "uppercase", letterSpacing: "0.12em" }}
+        >
+          concept
+        </Link>
       </div>
 
       <div className="flex-1 overflow-y-auto">
@@ -220,17 +228,28 @@ export function ControlPanel({ studio }: { studio: any }) {
         {/* ── Reference Image ── */}
         <div className="panel-section">
           <div className="label">Reference</div>
-          <div style={{ fontSize: "9px", color: "var(--text-faint)", marginBottom: 3 }}>concept model</div>
-          <select ref={refModelRef} defaultValue={s.default_image_model}>
-            {s.image_models.map((m: string) => (
-              <option key={m} value={m}>{m}</option>
-            ))}
-          </select>
+          {!s.has_gemini && (
+            <div style={{ fontSize: "9px", color: "var(--text-dim)", marginBottom: 8, lineHeight: 1.4 }}>
+              Concept art needs Gemini. Skip this and use Generate Sprite, or upload your own reference image.
+            </div>
+          )}
+          {s.has_gemini && (
+            <>
+              <div style={{ fontSize: "9px", color: "var(--text-faint)", marginBottom: 3 }}>concept model</div>
+              <select ref={refModelRef} defaultValue={s.default_image_model}>
+                {s.image_models.map((m: string) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+            </>
+          )}
 
           <div className="flex gap-1 mt-2">
-            <button className="btn flex-1" onClick={handleGenRef} disabled={isGenRef}>
-              {isGenRef ? "generating..." : "generate"}
-            </button>
+            {s.has_gemini && (
+              <button className="btn flex-1" onClick={handleGenRef} disabled={isGenRef}>
+                {isGenRef ? "generating..." : "generate"}
+              </button>
+            )}
             <button className="btn flex-1" onClick={() => fileRef.current?.click()}>upload</button>
             <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleUpload} />
           </div>
@@ -257,7 +276,9 @@ export function ControlPanel({ studio }: { studio: any }) {
                   >
                     {studio.refConfirmed ? "confirmed" : "confirm"}
                   </button>
-                  <button className="btn flex-1" onClick={handleRevise}>revise</button>
+                  {s.has_gemini && (
+                    <button className="btn flex-1" onClick={handleRevise}>revise</button>
+                  )}
                   <button className="btn btn-danger" onClick={studio.clearReference}>x</button>
                 </div>
               </motion.div>
